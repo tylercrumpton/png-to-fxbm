@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>PNG to FXBM Converter</title>
+    <script src="https://cdn.jsdelivr.net/pyodide/v0.26.3/full/pyodide.js"></script>
+    <style>
+      body {
+        font-family: Arial, sans-serif;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        padding: 20px;
+        background-color: #f4f4f9;
+        color: #333;
+      }
+      h1 {
+        color: #00509e;
+      }
+      .container {
+        max-width: 600px;
+        text-align: center;
+        padding: 20px;
+        background: #fff;
+        border-radius: 8px;
+        box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+      }
+      .description {
+        font-size: 16px;
+        margin-bottom: 20px;
+        color: #666;
+      }
+      #fileInput {
+        margin: 20px 0;
+      }
+      button {
+        padding: 10px 20px;
+        background-color: #00509e;
+        color: #fff;
+        border: none;
+        border-radius: 4px;
+        cursor: pointer;
+        font-size: 16px;
+      }
+      button:hover {
+        background-color: #003f7f;
+      }
+      #downloadLink {
+        display: block;
+        margin-top: 20px;
+        color: #00509e;
+        font-weight: bold;
+        text-decoration: none;
+      }
+      #downloadLink:hover {
+        text-decoration: underline;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <h1>PNG to FXBM Converter</h1>
+      <p class="description">
+        This tool allows you to convert PNG images into FXBM format, a custom
+        binary format. Upload a PNG file, and the converted file will be ready
+        for download.
+      </p>
+
+      <h3>How It Works</h3>
+      <p class="description">
+        Using Python and the Pyodide framework, this page processes PNG files
+        directly in the browser, converting them into FXBM format. The process
+        uses the Python Pillow library to manipulate and convert the image.
+      </p>
+      <p>
+        The Python image conversion code is a modified version of
+        <a
+          href="https://github.com/jamisonderek/flipboard/blob/main/flipblinky/blinky_png_to_fxbm.py"
+          >jamisonderek's blinky_png_to_fxbm.py script</a
+        >
+        which was originally based on
+        <a
+          href="https://github.com/flipperdevices/flipperzero-game-engine/blob/dev/scripts/sprite_builder.py"
+          >this sprite_builder.py</a
+        >.
+      </p>
+
+      <input type="file" id="fileInput" accept="image/png" />
+      <button onclick="convertImage()">Convert to FXBM</button>
+      <a id="downloadLink" style="display: none">Download FXBM</a>
+    </div>
+
+    <script>
+      async function loadPyodideAndDependencies() {
+        window.pyodide = await loadPyodide();
+        await pyodide.loadPackage("Pillow");
+      }
+
+      loadPyodideAndDependencies();
+
+      async function convertImage() {
+        const fileInput = document.getElementById("fileInput");
+        if (fileInput.files.length === 0) {
+          alert("Please upload a PNG file.");
+          return;
+        }
+
+        const file = fileInput.files[0];
+        const arrayBuffer = await file.arrayBuffer();
+
+        // Convert arrayBuffer to a Python bytes object
+        const pyBytes = pyodide.toPy(new Uint8Array(arrayBuffer));
+
+        const pythonCode = `
+import io
+import struct
+from PIL import Image, ImageOps
+
+def image2xbm(input_data):
+    with Image.open(io.BytesIO(input_data)) as im:
+        with io.BytesIO() as output:
+            bw = im.convert("1")
+            bw = ImageOps.invert(bw)
+            bw.save(output, format="XBM")
+            return output.getvalue()
+
+def xbm2fxbm(data):
+    f = io.StringIO(data.decode().strip())
+    width = int(f.readline().strip().split(" ")[2])
+    height = int(f.readline().strip().split(" ")[2])
+    data = f.read().strip().replace("\\n", "").replace(" ", "").split("=")[1][:-1]
+    data_str = data[1:-1].replace(",", " ").replace("0x", "")
+    image_bin = bytearray.fromhex(data_str)
+
+    output = struct.pack("<I", len(image_bin) + 8)
+    output += struct.pack("<II", width, height)
+    output += image_bin
+    return output
+
+def convert_to_fxbm(input_data):
+    xbm_data = image2xbm(input_data)
+    fxbm_data = xbm2fxbm(xbm_data)
+    return fxbm_data
+`;
+
+        await pyodide.runPythonAsync(pythonCode);
+
+        const convertToFxbm = pyodide.globals.get("convert_to_fxbm");
+        const result = convertToFxbm(pyBytes);
+
+        const fxbmBlob = new Blob([result.toJs()], {
+          type: "application/octet-stream",
+        });
+        const downloadLink = document.getElementById("downloadLink");
+        downloadLink.href = URL.createObjectURL(fxbmBlob);
+        downloadLink.download = "converted.fxbm";
+        downloadLink.style.display = "block";
+        downloadLink.innerText = "Download FXBM";
+      }
+    </script>
+  </body>
+</html>
